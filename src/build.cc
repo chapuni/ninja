@@ -160,6 +160,7 @@ Edge* Plan::FindWork() {
   EdgeSet::iterator e = ready_.begin();
   Edge* edge = *e;
   ready_.erase(e);
+  started_.insert(edge);
   return edge;
 }
 
@@ -583,6 +584,8 @@ void Plan::Refresh() {
   ready_.clear();
 
   std::set<Edge*> completed;
+  std::map<Edge*, std::set<Edge*>> waiting_edges;
+  std::map<Edge*, std::set<Edge*>> incomplete_edges;
   std::set<Edge*> queue(targets_);
 
   while (!queue.empty()) {
@@ -606,6 +609,7 @@ void Plan::Refresh() {
 
     bool complete = true;
     int max_cost = 0;
+    int ncomp = 0;
     for (auto node : edge->outputs_) {
       assert(edge == node->in_edge());
       for (auto out_edge : node->out_edges()) {
@@ -614,30 +618,69 @@ void Plan::Refresh() {
         } else if (out_edge->acc_cost_ < 0 || completed.find(out_edge) == completed.end()) {
           complete = false;
           queue.insert(out_edge);
-          fprintf(stderr, "\tPush(%05lu) %s: incomplete\n", out_edge->id_, node->path().c_str());
+	  waiting_edges[out_edge].insert(edge);
+	  incomplete_edges[edge].insert(out_edge);
+          fprintf(stderr, "\tPush(%05lu) %s: incomplete W(%lu/%lu) I(%lu/%lu)\n",
+		  out_edge->id_, node->path().c_str(),
+		  waiting_edges.size(), waiting_edges[out_edge].size(),
+		  incomplete_edges.size(), incomplete_edges[edge].size());
         } else {
           max_cost = std::max(max_cost, out_edge->acc_cost_);
+	  ++ncomp;
           fprintf(stderr, "\tCOMP(%05lu) %s\n", out_edge->id_, node->path().c_str());
         }
       }
     }
 
-    if (complete) {
-      edge->acc_cost_ = edge->cost() + max_cost;
-      completed.insert(edge);
-      fprintf(stderr, "\tcompeted(%d+%d)\n", edge->cost(), max_cost);
-      for (auto node : edge->inputs_) {
-        Edge* in_edge = node->in_edge();
-        if (want_.find(in_edge) == want_.end()) {
-          continue;
-        } else {
-          assert(completed.find(in_edge) == completed.end());
-          queue.insert(in_edge);
-          fprintf(stderr, "\tPush(%05lu) %s\n", in_edge->id_, node->path().c_str());
-        }
+    if (!complete) {
+      continue;
+    }
+
+    edge->acc_cost_ = edge->cost() + max_cost + ncomp;
+    completed.insert(edge);
+    fprintf(stderr, "\tcompleted(%d+%d)\n", edge->cost(), max_cost);
+    for (auto node : edge->inputs_) {
+      Edge* in_edge = node->in_edge();
+      if (want_.find(in_edge) == want_.end()) {
+	continue;
+      } else if (incomplete_edges.find(in_edge) == incomplete_edges.end()) {
+	assert(completed.find(in_edge) == completed.end());
+	queue.insert(in_edge);
+	fprintf(stderr, "\tPush(%05lu) %s\n", in_edge->id_, node->path().c_str());
       }
     }
+
+    auto W = waiting_edges.find(edge);
+    if (W != waiting_edges.end()) {
+      auto& waits = *W;
+      fprintf(stderr, "= %05lu's waiters (%lu)\n", edge->id_, waits.second.size());
+      for (Edge* w : waits.second) {
+	auto T = incomplete_edges.find(w);
+	if (T != incomplete_edges.end()) {
+	  auto& trig = *T;
+	  assert(trig.second.find(w) != trig.second.end());
+	  trig.second.erase(waits.first);
+	  if (trig.second.empty()) {
+	    queue.insert(w);
+	    incomplete_edges.erase(w);
+	    fprintf(stderr, "\tPush(%05lu) graduate I(%lu,-)\n",
+		    w->id_,
+		    incomplete_edges.size());
+	  } else {
+	    fprintf(stderr, "\t\t(%05lu) I(%lu,%lu)\n",
+		    w->id_,
+		    incomplete_edges.size(), incomplete_edges[w].size());
+	  }
+	}
+      }
+      waiting_edges.erase(edge);
+      fprintf(stderr, "\tW(%lu)\n",
+	      waiting_edges.size());
+    }
   }
+
+  fprintf(stderr, "Finished W(%lu) I(%lu)\n\n",
+	  waiting_edges.size(), incomplete_edges.size());
 
   ready_.insert(ready_saved.begin(), ready_saved.end());
 
@@ -654,7 +697,11 @@ void Plan::Refresh() {
     for (auto node : edge->outputs_) {
       fprintf(stderr, "%8d %c%05lu\t%s\n",
 	      edge->acc_cost_,
-	      (ready_.find(edge) != ready_.end() ? '+' : ' '),
+	      (started_.find(edge) != started_.end()
+	       ? '*'
+	       : (ready_.find(edge) != ready_.end()
+		  ? '+'
+		  : ' ')),
 	      edge->id_,
 	      node->path().c_str());
     }

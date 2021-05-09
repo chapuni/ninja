@@ -124,6 +124,7 @@ private:
   EdgeSet2 ready_;
 
   std::set<Edge*> targets_;
+  std::set<Edge*> started_;
 
   Builder* builder_;
 
