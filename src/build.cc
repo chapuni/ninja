@@ -89,6 +89,12 @@ void Plan::Reset() {
 }
 
 bool Plan::AddTarget(const Node* target, string* err) {
+#if 1
+  if (target->in_edge() != NULL) {
+    targets_.insert(target->in_edge());
+    fprintf(stderr, "AddTarget(%05lu)\n", target->in_edge()->id_);
+  }
+#endif
   return AddSubTarget(target, NULL, err, NULL);
 }
 
@@ -571,8 +577,97 @@ bool Builder::AlreadyUpToDate() const {
   return !plan_.more_to_do();
 }
 
+#if 1
+void Plan::Refresh() {
+  std::set<Edge*> ready_saved(ready_.begin(), ready_.end());
+  ready_.clear();
+
+  std::set<Edge*> completed;
+  std::set<Edge*> queue(targets_);
+
+  while (!queue.empty()) {
+    Edge* edge = *queue.begin();
+    queue.erase(edge);
+    fprintf(stderr, "%05lu:(in=%lu,out=%lu)\n", edge->id_, edge->inputs_.size(), edge->outputs_.size());
+
+#if 0
+    {
+      for (auto node : edge->inputs_) {
+	fprintf(stderr, "\tI:%s(%lu)\n", node->path().c_str(), node->out_edges().size());
+      }
+
+      for (auto node : edge->outputs_) {
+	fprintf(stderr, "\tO:%s(%lu)\n", node->path().c_str(), node->out_edges().size());
+      }
+    }
+#endif
+
+    assert(completed.find(edge) == completed.npos);
+
+    bool complete = true;
+    int max_cost = 0;
+    for (auto node : edge->outputs_) {
+      assert(edge == node->in_edge());
+      for (auto out_edge : node->out_edges()) {
+        if (want_.find(out_edge) == want_.end()) {
+          continue;
+        } else if (out_edge->acc_cost_ < 0 || completed.find(out_edge) == completed.end()) {
+          complete = false;
+          queue.insert(out_edge);
+          fprintf(stderr, "\tPush(%05lu) %s: incomplete\n", out_edge->id_, node->path().c_str());
+        } else {
+          max_cost = std::max(max_cost, out_edge->acc_cost_);
+          fprintf(stderr, "\tCOMP(%05lu) %s\n", out_edge->id_, node->path().c_str());
+        }
+      }
+    }
+
+    if (complete) {
+      edge->acc_cost_ = edge->cost() + max_cost;
+      completed.insert(edge);
+      fprintf(stderr, "\tcompeted(%d+%d)\n", edge->cost(), max_cost);
+      for (auto node : edge->inputs_) {
+        Edge* in_edge = node->in_edge();
+        if (want_.find(in_edge) == want_.end()) {
+          continue;
+        } else {
+          assert(completed.find(in_edge) == completed.end());
+          queue.insert(in_edge);
+          fprintf(stderr, "\tPush(%05lu) %s\n", in_edge->id_, node->path().c_str());
+        }
+      }
+    }
+  }
+
+  ready_.insert(ready_saved.begin(), ready_saved.end());
+
+  EdgeSet2 xxx(completed.begin(), completed.end());
+  fprintf(stderr, "*n=%lu->%lu\n", completed.size(), xxx.size());
+  for (auto edge : xxx) {
+#if 0
+    fprintf(stderr, "%8d %c%05lu:(in=%lu,out=%lu)\n",
+	    edge->acc_cost_,
+	    (ready_.find(edge) != ready_.end() ? '+' : ' '),
+	    edge->id_, edge->inputs_.size(), edge->outputs_.size());
+#endif
+    if (edge->is_phony()) continue;
+    for (auto node : edge->outputs_) {
+      fprintf(stderr, "%8d %c%05lu\t%s\n",
+	      edge->acc_cost_,
+	      (ready_.find(edge) != ready_.end() ? '+' : ' '),
+	      edge->id_,
+	      node->path().c_str());
+    }
+  }
+}
+#endif
+
 bool Builder::Build(string* err) {
   assert(!AlreadyUpToDate());
+
+#if 1
+  plan_.Refresh();
+#endif
 
   status_->PlanHasTotalEdges(plan_.command_edge_count());
   int pending_commands = 0;
@@ -908,6 +1003,10 @@ bool Builder::LoadDyndeps(Node* node, string* err) {
   // Update the build plan to account for dyndep modifications to the graph.
   if (!plan_.DyndepsLoaded(&scan_, node, ddf, err))
     return false;
+
+#if 1
+  plan_.Refresh();
+#endif
 
   // New command edges may have been added to the plan.
   status_->PlanHasTotalEdges(plan_.command_edge_count());

@@ -39,7 +39,7 @@ void Pool::DelayEdge(Edge* edge) {
   delayed_.insert(edge);
 }
 
-void Pool::RetrieveReadyEdges(EdgeSet* ready_queue) {
+void Pool::RetrieveReadyEdges(EdgeSet2* ready_queue) {
   DelayedEdges::iterator it = delayed_.begin();
   while (it != delayed_.end()) {
     Edge* edge = *it;

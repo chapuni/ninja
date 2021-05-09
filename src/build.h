@@ -80,6 +80,8 @@ struct Plan {
   /// by information loaded from a dyndep file.
   bool DyndepsLoaded(DependencyScan* scan, const Node* node,
                      const DyndepFile& ddf, std::string* err);
+
+  void Refresh();
 private:
   bool RefreshDyndepDependents(DependencyScan* scan, const Node* node, std::string* err);
   void UnmarkDependents(const Node* node, std::set<Node*>* dependents);
@@ -119,7 +121,9 @@ private:
   /// we want for the edge.
   std::map<Edge*, Want> want_;
 
-  EdgeSet ready_;
+  EdgeSet2 ready_;
+
+  std::set<Edge*> targets_;
 
   Builder* builder_;
 

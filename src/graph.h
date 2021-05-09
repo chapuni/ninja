@@ -148,6 +148,7 @@ struct Edge {
       : rule_(NULL), pool_(NULL), dyndep_(NULL), env_(NULL), mark_(VisitNone),
         id_(0), outputs_ready_(false), deps_loaded_(false),
         deps_missing_(false), generated_by_dep_loader_(false),
+        acc_cost_(-1),
         implicit_deps_(0), order_only_deps_(0), implicit_outs_(0) {}
 
   /// Return true if all inputs' in-edges are ready.
@@ -183,6 +184,11 @@ struct Edge {
   bool deps_loaded_;
   bool deps_missing_;
   bool generated_by_dep_loader_;
+
+#if 1
+  int acc_cost_;
+  int cost() { return (is_phony() ? 0 : 1000); }
+#endif
 
   const Rule& rule() const { return *rule_; }
   Pool* pool() const { return pool_; }
@@ -228,7 +234,18 @@ struct EdgeCmp {
   }
 };
 
+#if 1
 typedef std::set<Edge*, EdgeCmp> EdgeSet;
+
+struct EdgeCmp2 {
+  bool operator()(const Edge* a, const Edge* b) const {
+    if (a->acc_cost_ == b->acc_cost_) return a->id_ < b->id_;
+    return a->acc_cost_ > b->acc_cost_;
+  }
+};
+
+typedef std::set<Edge*, EdgeCmp2> EdgeSet2;
+#endif
 
 /// ImplicitDepLoader loads implicit dependencies, as referenced via the
 /// "depfile" attribute in build files.
