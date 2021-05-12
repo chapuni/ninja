@@ -148,7 +148,7 @@ struct Edge {
       : rule_(NULL), pool_(NULL), dyndep_(NULL), env_(NULL), mark_(VisitNone),
         id_(0), outputs_ready_(false), deps_loaded_(false),
         deps_missing_(false), generated_by_dep_loader_(false),
-        acc_cost_(-1),
+        acc_cost_(0),
         implicit_deps_(0), order_only_deps_(0), implicit_outs_(0) {}
 
   /// Return true if all inputs' in-edges are ready.
@@ -187,7 +187,7 @@ struct Edge {
 
 #if 1
   int acc_cost_;
-  int cost() { return (is_phony() ? 0 : 1000); }
+  int cost() { return (is_phony() ? 0 : 1000 + inputs_.size()); }
 #endif
 
   const Rule& rule() const { return *rule_; }

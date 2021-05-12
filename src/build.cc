@@ -579,133 +579,139 @@ bool Builder::AlreadyUpToDate() const {
 }
 
 #if 1
-void Plan::Refresh() {
-  std::set<Edge*> ready_saved(ready_.begin(), ready_.end());
-  ready_.clear();
 
-  std::set<Edge*> completed;
-  std::map<Edge*, std::set<Edge*>> waiting_edges;
-  std::map<Edge*, std::set<Edge*>> incomplete_edges;
-  std::set<Edge*> queue(targets_);
+#define DEBUG2(...) fprintf(stderr, __VA_ARGS__)
 
-  while (!queue.empty()) {
-    Edge* edge = *queue.begin();
-    queue.erase(edge);
-    fprintf(stderr, "%05lu:(in=%lu,out=%lu)\n", edge->id_, edge->inputs_.size(), edge->outputs_.size());
-
-#if 0
-    {
-      for (auto node : edge->inputs_) {
-	fprintf(stderr, "\tI:%s(%lu)\n", node->path().c_str(), node->out_edges().size());
-      }
-
-      for (auto node : edge->outputs_) {
-	fprintf(stderr, "\tO:%s(%lu)\n", node->path().c_str(), node->out_edges().size());
-      }
-    }
+#if 1
+#define DEBUG(...) DEBUG2(__VA_ARGS__)
+#else
+#define DEBUG(...)
 #endif
 
-    assert(completed.find(edge) == completed.npos);
+template <class WantSetT>
+int update(Edge *edge, const WantSetT& want) {
 
-    bool complete = true;
-    int max_cost = 0;
-    int ncomp = 0;
-    for (auto node : edge->outputs_) {
-      assert(edge == node->in_edge());
-      for (auto out_edge : node->out_edges()) {
-        if (want_.find(out_edge) == want_.end()) {
-          continue;
-        } else if (out_edge->acc_cost_ < 0 || completed.find(out_edge) == completed.end()) {
-          complete = false;
-          queue.insert(out_edge);
-	  waiting_edges[out_edge].insert(edge);
-	  incomplete_edges[edge].insert(out_edge);
-          fprintf(stderr, "\tPush(%05lu) %s: incomplete W(%lu/%lu) I(%lu/%lu)\n",
-		  out_edge->id_, node->path().c_str(),
-		  waiting_edges.size(), waiting_edges[out_edge].size(),
-		  incomplete_edges.size(), incomplete_edges[edge].size());
-        } else {
-          max_cost = std::max(max_cost, out_edge->acc_cost_);
-	  ++ncomp;
-          fprintf(stderr, "\tCOMP(%05lu) %s\n", out_edge->id_, node->path().c_str());
-        }
+  int max_cost = 0;
+  for (auto node : edge->outputs_) {
+    for (auto out_edge : node->out_edges()) {
+      if (want.find(out_edge) == want.end()) continue;
+      if (out_edge->acc_cost_ == 0) {
+        DEBUG("%05lu: unresolved\n", edge->id_);
+        return 1;
+      } else {
+        max_cost = std::max(max_cost, out_edge->acc_cost_);
       }
-    }
-
-    if (!complete) {
-      continue;
-    }
-
-    edge->acc_cost_ = edge->cost() + max_cost + ncomp;
-    completed.insert(edge);
-    fprintf(stderr, "\tcompleted(%d+%d)\n", edge->cost(), max_cost);
-    for (auto node : edge->inputs_) {
-      Edge* in_edge = node->in_edge();
-      if (want_.find(in_edge) == want_.end()) {
-	continue;
-      } else if (incomplete_edges.find(in_edge) == incomplete_edges.end()) {
-	assert(completed.find(in_edge) == completed.end());
-	queue.insert(in_edge);
-	fprintf(stderr, "\tPush(%05lu) %s\n", in_edge->id_, node->path().c_str());
-      }
-    }
-
-    auto W = waiting_edges.find(edge);
-    if (W != waiting_edges.end()) {
-      auto& waits = *W;
-      fprintf(stderr, "= %05lu's waiters (%lu)\n", edge->id_, waits.second.size());
-      for (Edge* w : waits.second) {
-	auto T = incomplete_edges.find(w);
-	if (T != incomplete_edges.end()) {
-	  auto& trig = *T;
-	  assert(trig.second.find(w) != trig.second.end());
-	  trig.second.erase(waits.first);
-	  if (trig.second.empty()) {
-	    queue.insert(w);
-	    incomplete_edges.erase(w);
-	    fprintf(stderr, "\tPush(%05lu) graduate I(%lu,-)\n",
-		    w->id_,
-		    incomplete_edges.size());
-	  } else {
-	    fprintf(stderr, "\t\t(%05lu) I(%lu,%lu)\n",
-		    w->id_,
-		    incomplete_edges.size(), incomplete_edges[w].size());
-	  }
-	}
-      }
-      waiting_edges.erase(edge);
-      fprintf(stderr, "\tW(%lu)\n",
-	      waiting_edges.size());
     }
   }
 
-  fprintf(stderr, "Finished W(%lu) I(%lu)\n\n",
-	  waiting_edges.size(), incomplete_edges.size());
+  edge->acc_cost_ = 1 + edge->cost() + max_cost;
+  DEBUG("%05lu: resolved\n", edge->id_);
+
+  return 0;
+}
+
+template <class EdgeSetT, class WantSetT>
+int traverse(Edge* edge, EdgeSetT& waterfronts, const WantSetT& want) {
+  if (waterfronts.find(edge) != waterfronts.end()) {
+    DEBUG("%05lu: found\n", edge->id_);
+    return 0;
+  }
+
+  if (edge->acc_cost_ > 0) {
+    DEBUG("%05lu: visited\n", edge->id_);
+    return 0;
+  }
+
+  if (update(edge, want) > 0) {
+    waterfronts.insert(edge);
+    DEBUG("%05lu: not traverse(%lu)\n", edge->id_, edge->inputs_.size());
+    return 0;
+  }
+
+  int n = 1;
+  DEBUG("%05lu: traverse(%lu)\n", edge->id_, edge->inputs_.size());
+  for (auto node : edge->inputs_) {
+    Edge* in_edge = node->in_edge();
+    if (!in_edge) continue;
+    if (want.find(in_edge) == want.end()) continue;
+    n += traverse(in_edge, waterfronts, want);
+  }
+
+  return n;
+}
+
+#include <sys/time.h>
+
+void Plan::Refresh() {
+  std::vector<Edge*> ready_saved(ready_.begin(), ready_.end());
+  ready_.clear();
+
+#if 1
+  time_t s, e;
+  struct timeval tv;
+  gettimeofday(&tv, NULL);
+  s = 1000000 * tv.tv_sec + tv.tv_usec;
+
+  EdgeSet unresolved;
+
+  unresolved.insert(targets_.begin(), targets_.end());
+
+  while (!unresolved.empty()) {
+    EdgeSet queue;
+
+    for (auto I = unresolved.begin(); I != unresolved.end();) {
+      Edge* edge = *I;
+
+      if (update(edge, want_) > 0) {
+        ++I;
+        continue;
+      } else {
+        queue.insert(edge);
+        I = unresolved.erase(I);
+        edge->acc_cost_ = 0; /* XXX */
+        continue;
+      }
+    }
+
+    DEBUG("q=%lu, u=%lu\n", queue.size(), unresolved.size());
+
+    for (auto edge : queue) {
+      auto n = traverse(edge, unresolved, want_);
+      DEBUG("\t%05lu: %d\n", edge->id_, n);
+    }
+  }
+
+  gettimeofday(&tv, NULL);
+  e = 1000000 * tv.tv_sec + tv.tv_usec;
+  DEBUG2("time=%.6f\n", (e - s) / 1000000.0);
 
   ready_.insert(ready_saved.begin(), ready_saved.end());
 
-  EdgeSet2 xxx(completed.begin(), completed.end());
-  fprintf(stderr, "*n=%lu->%lu\n", completed.size(), xxx.size());
+  EdgeSet2 xxx;
+  for (auto I : want_) xxx.insert(I.first);
   for (auto edge : xxx) {
 #if 0
-    fprintf(stderr, "%8d %c%05lu:(in=%lu,out=%lu)\n",
-	    edge->acc_cost_,
-	    (ready_.find(edge) != ready_.end() ? '+' : ' '),
-	    edge->id_, edge->inputs_.size(), edge->outputs_.size());
+    DEBUG2("%8d %c%05lu:(in=%lu,out=%lu)\n",
+            edge->acc_cost_,
+            (ready_.find(edge) != ready_.end() ? '+' : ' '),
+            edge->id_, edge->inputs_.size(), edge->outputs_.size());
 #endif
     if (edge->is_phony()) continue;
     for (auto node : edge->outputs_) {
-      fprintf(stderr, "%8d %c%05lu\t%s\n",
-	      edge->acc_cost_,
-	      (started_.find(edge) != started_.end()
-	       ? '*'
-	       : (ready_.find(edge) != ready_.end()
-		  ? '+'
-		  : ' ')),
-	      edge->id_,
-	      node->path().c_str());
+      DEBUG2("%8d %c%05lu\t%s\n",
+             edge->acc_cost_,
+              (started_.find(edge) != started_.end()
+               ? '*'
+               : (ready_.find(edge) != ready_.end()
+                  ? '+'
+                  : ' ')),
+              edge->id_,
+              node->path().c_str());
     }
   }
+  assert(!"XXX");
+
+#endif
 }
 #endif
 
