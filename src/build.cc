@@ -580,60 +580,63 @@ bool Builder::AlreadyUpToDate() const {
 
 #if 1
 
-#define DEBUG2(...) fprintf(stderr, __VA_ARGS__)
 
 #if 1
-#define DEBUG(...) DEBUG2(__VA_ARGS__)
+#define DEBUG(n,...) do if ((n) <= 1) { fprintf(stderr, __VA_ARGS__); } while (0)
 #else
 #define DEBUG(...)
 #endif
+
+#define TRACE(...) DEBUG(2, __VA_ARGS__)
 
 template <class WantSetT>
 int update(Edge *edge, const WantSetT& want) {
 
   int max_cost = 0;
+  int n_unresolved = 0;
   for (auto node : edge->outputs_) {
     for (auto out_edge : node->out_edges()) {
       if (want.find(out_edge) == want.end()) continue;
-      if (out_edge->acc_cost_ == 0) {
-        DEBUG("%05lu: unresolved\n", edge->id_);
-        return 1;
+      if (out_edge->acc_cost_ <= 0) {
+        TRACE("%05lu: unresolved\n", edge->id_);
+	++n_unresolved;
       } else {
         max_cost = std::max(max_cost, out_edge->acc_cost_);
       }
     }
   }
 
+  if (n_unresolved > 0) {
+    edge->acc_cost_ = (max_cost << 1) - 0x80000000;
+    return 1;
+  }
+
   edge->acc_cost_ = 1 + edge->cost() + max_cost;
-  DEBUG("%05lu: resolved\n", edge->id_);
+  TRACE("%05lu: resolved\n", edge->id_);
 
   return 0;
 }
 
 template <class EdgeSetT, class WantSetT>
 int traverse(Edge* edge, EdgeSetT& waterfronts, const WantSetT& want) {
-  if (waterfronts.find(edge) != waterfronts.end()) {
-    DEBUG("%05lu: found\n", edge->id_);
-    return 0;
-  }
-
   if (edge->acc_cost_ > 0) {
-    DEBUG("%05lu: visited\n", edge->id_);
+    TRACE("%05lu: visited\n", edge->id_);
     return 0;
   }
 
   if (update(edge, want) > 0) {
-    waterfronts.insert(edge);
-    DEBUG("%05lu: not traverse(%lu)\n", edge->id_, edge->inputs_.size());
+    waterfronts.push_back(edge);
+    TRACE("%05lu: not traverse(%lu)\n", edge->id_, edge->inputs_.size());
     return 0;
   }
 
   int n = 1;
-  DEBUG("%05lu: traverse(%lu)\n", edge->id_, edge->inputs_.size());
+  TRACE("%05lu: traverse(%lu)\n", edge->id_, edge->inputs_.size());
   for (auto node : edge->inputs_) {
     Edge* in_edge = node->in_edge();
     if (!in_edge) continue;
     if (want.find(in_edge) == want.end()) continue;
+    if (in_edge->acc_cost_ < 0) continue;
     n += traverse(in_edge, waterfronts, want);
   }
 
@@ -652,38 +655,43 @@ void Plan::Refresh() {
   gettimeofday(&tv, NULL);
   s = 1000000 * tv.tv_sec + tv.tv_usec;
 
-  EdgeSet unresolved;
+  std::vector<Edge*> unresolved;
 
-  unresolved.insert(targets_.begin(), targets_.end());
+  for (auto edge : targets_) unresolved.push_back(edge);
 
   while (!unresolved.empty()) {
-    EdgeSet queue;
+    std::vector<Edge*> queue;
 
-    for (auto I = unresolved.begin(); I != unresolved.end();) {
+    std::sort(unresolved.begin(), unresolved.end(),
+	      [](const Edge* a, const Edge* b) {
+		return a->id_ > b->id_;
+	      });
+
+    for (auto I = unresolved.begin(); I != unresolved.end(); ) {
       Edge* edge = *I;
 
       if (update(edge, want_) > 0) {
-        ++I;
+	++I;
         continue;
       } else {
-        queue.insert(edge);
-        I = unresolved.erase(I);
+        queue.push_back(edge);
+	I = unresolved.erase(I);
         edge->acc_cost_ = 0; /* XXX */
         continue;
       }
     }
 
-    DEBUG("q=%lu, u=%lu\n", queue.size(), unresolved.size());
+    DEBUG(1, "q=%lu, u=%lu\n", queue.size(), unresolved.size());
 
     for (auto edge : queue) {
       auto n = traverse(edge, unresolved, want_);
-      DEBUG("\t%05lu: %d\n", edge->id_, n);
+      TRACE("\t%05lu: %d\n", edge->id_, n);
     }
   }
 
   gettimeofday(&tv, NULL);
   e = 1000000 * tv.tv_sec + tv.tv_usec;
-  DEBUG2("time=%.6f\n", (e - s) / 1000000.0);
+  DEBUG(0, "time=%.6f\n", (e - s) / 1000000.0);
 
   ready_.insert(ready_saved.begin(), ready_saved.end());
 
@@ -698,7 +706,7 @@ void Plan::Refresh() {
 #endif
     if (edge->is_phony()) continue;
     for (auto node : edge->outputs_) {
-      DEBUG2("%8d %c%05lu\t%s\n",
+      DEBUG(0, "%8d %c%05lu\t%s\n",
              edge->acc_cost_,
               (started_.find(edge) != started_.end()
                ? '*'
