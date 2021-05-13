@@ -374,6 +374,23 @@ bool Plan::DyndepsLoaded(DependencyScan* scan, const Node* node,
       return false;
   }
 
+#if 1
+  {
+    for (auto edge : dyndep_walk) {
+      for (auto node : edge->outputs_)
+	fprintf(stderr, "\t%05lu:%s\n", edge->id_, node->path().c_str());
+      edge->acc_cost_ = 0;
+      targets_.insert(edge);
+    }
+#if 0
+    Edge* edge = node->in_edge();
+    edge->acc_cost_ = 0;
+    targets_.insert(edge);
+#endif
+    Refresh();
+  }
+#endif
+
   return true;
 }
 
@@ -581,7 +598,7 @@ bool Builder::AlreadyUpToDate() const {
 #if 1
 
 #if 1
-#define DEBUG(n,...) do if ((n) <= 1) { fprintf(stderr, __VA_ARGS__); } while (0)
+#define DEBUG(n,...) do if ((n) <= 2) { fprintf(stderr, __VA_ARGS__); } while (0)
 #else
 #define DEBUG(...)
 #endif
@@ -590,10 +607,12 @@ bool Builder::AlreadyUpToDate() const {
 
 template <class WantSetT>
 int traverse(Edge* edge, const WantSetT& want) {
+#if 0
   if (edge->acc_cost_ > 0) {
     TRACE("%05lu: visited\n", edge->id_);
     return 0;
   }
+#endif
 
   int max_cost = 0;
   int n_unresolved = 0;
@@ -621,9 +640,14 @@ int traverse(Edge* edge, const WantSetT& want) {
   for (auto node : edge->inputs_) {
     Edge* in_edge = node->in_edge();
     if (!in_edge) continue;
-    if (want.find(in_edge) == want.end()) continue;
+    if (want.find(in_edge) == want.end()) {
+      continue;
+    }
     if (in_edge->acc_cost_ < 0 && ++in_edge->acc_cost_ < 0) continue;
-    if (in_edge->acc_cost_ > 0) continue;
+    if (in_edge->acc_cost_ > 0) {
+      TRACE("%05lu: %05lu: visited\n", edge->id_, in_edge->id_);
+      continue;
+    }
     n += traverse(in_edge, want);
   }
 
@@ -643,6 +667,7 @@ void Plan::Refresh() {
   s = 1000000 * tv.tv_sec + tv.tv_usec;
 
   for (auto edge : targets_) {
+    if (edge->acc_cost_ > 0) continue;
     int n = traverse(edge, want_);
     fprintf(stderr, "%05lu: n=%5d\n", edge->id_, n);
   }
@@ -1022,10 +1047,6 @@ bool Builder::LoadDyndeps(Node* node, string* err) {
   // Update the build plan to account for dyndep modifications to the graph.
   if (!plan_.DyndepsLoaded(&scan_, node, ddf, err))
     return false;
-
-#if 1
-  plan_.Refresh();
-#endif
 
   // New command edges may have been added to the plan.
   status_->PlanHasTotalEdges(plan_.command_edge_count());
