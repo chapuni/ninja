@@ -588,8 +588,8 @@ bool Builder::AlreadyUpToDate() const {
 
 #define TRACE(...) DEBUG(2, __VA_ARGS__)
 
-template <class EdgeSetT, class WantSetT>
-int traverse(Edge* edge, EdgeSetT& waterfronts, const WantSetT& want) {
+template <class WantSetT>
+int traverse(Edge* edge, const WantSetT& want) {
   if (edge->acc_cost_ > 0) {
     TRACE("%05lu: visited\n", edge->id_);
     return 0;
@@ -601,7 +601,7 @@ int traverse(Edge* edge, EdgeSetT& waterfronts, const WantSetT& want) {
     for (auto out_edge : node->out_edges()) {
       if (want.find(out_edge) == want.end()) continue;
       if (out_edge->acc_cost_ <= 0) {
-	++n_unresolved;
+        ++n_unresolved;
       } else {
         max_cost = std::max(max_cost, out_edge->acc_cost_);
       }
@@ -610,28 +610,21 @@ int traverse(Edge* edge, EdgeSetT& waterfronts, const WantSetT& want) {
 
   if (n_unresolved > 0) {
     TRACE("%05lu: unresolved(%d)\n", edge->id_, n_unresolved);
-    waterfronts.push_back(edge);
-    edge->acc_cost_ = max_cost | -0x80000000;
-    edge->kari_unresolved_ = n_unresolved;
+    edge->acc_cost_ = -n_unresolved;
     return 0;
   }
 
-  edge->kari_unresolved_ = 0;
   edge->acc_cost_ = 1 + edge->cost() + max_cost;
-  TRACE("%05lu: resolved\n", edge->id_);
+  TRACE("%05lu: resolved%8d n=%lu\n", edge->id_, edge->acc_cost_, edge->inputs_.size());
 
   int n = 1;
-  TRACE("%05lu: traverse(%lu)\n", edge->id_, edge->inputs_.size());
   for (auto node : edge->inputs_) {
     Edge* in_edge = node->in_edge();
     if (!in_edge) continue;
     if (want.find(in_edge) == want.end()) continue;
-    if (in_edge->acc_cost_ < 0 && --in_edge->kari_unresolved_ > 0) continue;
-    auto prev_c = in_edge->acc_cost_;
-    n += traverse(in_edge, waterfronts, want);
-    if (prev_c < 0 && in_edge->kari_unresolved_ > 0) {
-      TRACE("%05lu: resolve failed(%d)\n", in_edge->id_, in_edge->kari_unresolved_);
-    }
+    if (in_edge->acc_cost_ < 0 && ++in_edge->acc_cost_ < 0) continue;
+    if (in_edge->acc_cost_ > 0) continue;
+    n += traverse(in_edge, want);
   }
 
   return n;
@@ -649,34 +642,9 @@ void Plan::Refresh() {
   gettimeofday(&tv, NULL);
   s = 1000000 * tv.tv_sec + tv.tv_usec;
 
-  std::vector<Edge*> unresolved;
-
-  for (auto edge : targets_) unresolved.push_back(edge);
-
-  while (!unresolved.empty()) {
-    std::vector<Edge*> queue(unresolved);
-    unresolved.clear();
-
-    std::sort(queue.begin(), queue.end(),
-	      [](const Edge* a, const Edge* b) {
-		return a->id_ > b->id_;
-	      });
-
-    for (auto edge : queue) {
-      if (edge->acc_cost_ >= 0)
-	DEBUG(1, "%05lu:%8d\n", edge->id_, edge->acc_cost_);
-      else
-	DEBUG(1, "%05lu:\t\t%8d %d\n", edge->id_, edge->acc_cost_, edge->kari_unresolved_);
-    }
-
-    int nn = 0;
-    for (auto edge : queue) {
-      edge->acc_cost_ = 0;
-      int n = traverse(edge, unresolved, want_);
-      nn += n;
-    }
-
-    DEBUG(1, "nn=%d u=%lu=>%lu\n", nn, queue.size(), unresolved.size());
+  for (auto edge : targets_) {
+    int n = traverse(edge, want_);
+    fprintf(stderr, "%05lu: n=%5d\n", edge->id_, n);
   }
 
   gettimeofday(&tv, NULL);
