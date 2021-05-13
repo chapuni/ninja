@@ -580,7 +580,6 @@ bool Builder::AlreadyUpToDate() const {
 
 #if 1
 
-
 #if 1
 #define DEBUG(n,...) do if ((n) <= 1) { fprintf(stderr, __VA_ARGS__); } while (0)
 #else
@@ -589,8 +588,12 @@ bool Builder::AlreadyUpToDate() const {
 
 #define TRACE(...) DEBUG(2, __VA_ARGS__)
 
-template <class WantSetT>
-int update(Edge *edge, const WantSetT& want) {
+template <class EdgeSetT, class WantSetT>
+int traverse(Edge* edge, EdgeSetT& waterfronts, const WantSetT& want) {
+  if (edge->acc_cost_ > 0) {
+    TRACE("%05lu: visited\n", edge->id_);
+    return 0;
+  }
 
   int max_cost = 0;
   int n_unresolved = 0;
@@ -607,28 +610,13 @@ int update(Edge *edge, const WantSetT& want) {
   }
 
   if (n_unresolved > 0) {
-    edge->acc_cost_ = (max_cost << 1) - 0x80000000;
-    return 1;
+    edge->acc_cost_ = max_cost | -0x80000000;
+    waterfronts.push_back(edge);
+    return 0;
   }
 
   edge->acc_cost_ = 1 + edge->cost() + max_cost;
   TRACE("%05lu: resolved\n", edge->id_);
-
-  return 0;
-}
-
-template <class EdgeSetT, class WantSetT>
-int traverse(Edge* edge, EdgeSetT& waterfronts, const WantSetT& want) {
-  if (edge->acc_cost_ > 0) {
-    TRACE("%05lu: visited\n", edge->id_);
-    return 0;
-  }
-
-  if (update(edge, want) > 0) {
-    waterfronts.push_back(edge);
-    TRACE("%05lu: not traverse(%lu)\n", edge->id_, edge->inputs_.size());
-    return 0;
-  }
 
   int n = 1;
   TRACE("%05lu: traverse(%lu)\n", edge->id_, edge->inputs_.size());
@@ -660,33 +648,21 @@ void Plan::Refresh() {
   for (auto edge : targets_) unresolved.push_back(edge);
 
   while (!unresolved.empty()) {
-    std::vector<Edge*> queue;
+    std::vector<Edge*> queue(unresolved);
+    unresolved.clear();
 
-    std::sort(unresolved.begin(), unresolved.end(),
+    std::sort(queue.begin(), queue.end(),
 	      [](const Edge* a, const Edge* b) {
 		return a->id_ > b->id_;
 	      });
 
-    for (auto I = unresolved.begin(); I != unresolved.end(); ) {
-      Edge* edge = *I;
-
-      if (update(edge, want_) > 0) {
-	++I;
-        continue;
-      } else {
-        queue.push_back(edge);
-	I = unresolved.erase(I);
-        edge->acc_cost_ = 0; /* XXX */
-        continue;
-      }
-    }
-
-    DEBUG(1, "q=%lu, u=%lu\n", queue.size(), unresolved.size());
-
+    int nn = 0;
     for (auto edge : queue) {
-      auto n = traverse(edge, unresolved, want_);
-      TRACE("\t%05lu: %d\n", edge->id_, n);
+      int n = traverse(edge, unresolved, want_);
+      nn += n;
     }
+
+    DEBUG(1, "nn=%d u=%lu=>%lu\n", nn, queue.size(), unresolved.size());
   }
 
   gettimeofday(&tv, NULL);
