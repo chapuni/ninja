@@ -149,6 +149,7 @@ struct Edge {
         id_(0), outputs_ready_(false), deps_loaded_(false),
         deps_missing_(false), generated_by_dep_loader_(false),
         acc_cost_(0),
+	kari_unresolved_(0),
         implicit_deps_(0), order_only_deps_(0), implicit_outs_(0) {}
 
   /// Return true if all inputs' in-edges are ready.
@@ -187,6 +188,7 @@ struct Edge {
 
 #if 1
   int acc_cost_;
+  int kari_unresolved_;
   int cost() { return (is_phony() ? 0 : 1000 + inputs_.size()); }
 #endif
 
