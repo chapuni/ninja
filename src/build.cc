@@ -374,12 +374,15 @@ bool Plan::DyndepsLoaded(DependencyScan* scan, const Node* node,
       return false;
   }
 
-#if 1
+#if 0
+  targets_ = dyndep_walk;
+  Refresh(60000);
+#else
   {
     for (auto edge : dyndep_walk) {
       for (auto node : edge->outputs_)
 	fprintf(stderr, "\t%05lu:%s\n", edge->id_, node->path().c_str());
-      edge->acc_cost_ = 0;
+      //edge->acc_cost_ = 0;
       targets_.insert(edge);
     }
 #if 0
@@ -387,7 +390,11 @@ bool Plan::DyndepsLoaded(DependencyScan* scan, const Node* node,
     edge->acc_cost_ = 0;
     targets_.insert(edge);
 #endif
-    Refresh();
+    fprintf(stderr, "root=%lu, walk=%lu, targets=%lu [%s]\n",
+	    dyndep_roots.size(),
+	    dyndep_walk.size(), targets_.size(),
+	    (dyndep_walk.size() ==  targets_.size() ? "OK" : "***NG***"));
+    Refresh(60000);
   }
 #endif
 
@@ -598,7 +605,7 @@ bool Builder::AlreadyUpToDate() const {
 #if 1
 
 #if 1
-#define DEBUG(n,...) do if ((n) <= 2) { fprintf(stderr, __VA_ARGS__); } while (0)
+#define DEBUG(n,...) do if ((n) <= 1) { fprintf(stderr, __VA_ARGS__); } while (0)
 #else
 #define DEBUG(...)
 #endif
@@ -606,7 +613,7 @@ bool Builder::AlreadyUpToDate() const {
 #define TRACE(...) DEBUG(2, __VA_ARGS__)
 
 template <class WantSetT>
-int traverse(Edge* edge, const WantSetT& want) {
+int traverse(Edge* edge, int bonus, const WantSetT& want) {
 #if 0
   if (edge->acc_cost_ > 0) {
     TRACE("%05lu: visited\n", edge->id_);
@@ -614,11 +621,13 @@ int traverse(Edge* edge, const WantSetT& want) {
   }
 #endif
 
+  int n_outputs = 0;
   int max_cost = 0;
   int n_unresolved = 0;
   for (auto node : edge->outputs_) {
     for (auto out_edge : node->out_edges()) {
       if (want.find(out_edge) == want.end()) continue;
+      ++n_outputs;
       if (out_edge->acc_cost_ <= 0) {
         ++n_unresolved;
       } else {
@@ -633,7 +642,11 @@ int traverse(Edge* edge, const WantSetT& want) {
     return 0;
   }
 
-  edge->acc_cost_ = 1 + edge->cost() + max_cost;
+  if (edge->acc_cost_ > 0) {
+    edge->acc_cost_ = std::max(edge->acc_cost_, edge->cost() + max_cost); // + 100 * n_outputs;
+  } else {
+    edge->acc_cost_ = bonus + 1 + edge->cost() + max_cost; // + 100 * n_outputs;
+  }
   TRACE("%05lu: resolved%8d n=%lu\n", edge->id_, edge->acc_cost_, edge->inputs_.size());
 
   int n = 1;
@@ -648,7 +661,7 @@ int traverse(Edge* edge, const WantSetT& want) {
       TRACE("%05lu: %05lu: visited\n", edge->id_, in_edge->id_);
       continue;
     }
-    n += traverse(in_edge, want);
+    n += traverse(in_edge, bonus, want);
   }
 
   return n;
@@ -656,7 +669,7 @@ int traverse(Edge* edge, const WantSetT& want) {
 
 #include <sys/time.h>
 
-void Plan::Refresh() {
+void Plan::Refresh(int bonus) {
   std::vector<Edge*> ready_saved(ready_.begin(), ready_.end());
   ready_.clear();
 
@@ -667,10 +680,16 @@ void Plan::Refresh() {
   s = 1000000 * tv.tv_sec + tv.tv_usec;
 
   for (auto edge : targets_) {
+#if 1
+    //edge->acc_cost_ += bonus;
+#else
     if (edge->acc_cost_ > 0) continue;
-    int n = traverse(edge, want_);
-    fprintf(stderr, "%05lu: n=%5d\n", edge->id_, n);
+#endif
+    int n = traverse(edge, bonus, want_);
+    fprintf(stderr, "%05lu: ready=%d n=%5d\n", edge->id_, edge->outputs_ready(), n);
   }
+
+  targets_.clear(); // XXX
 
   gettimeofday(&tv, NULL);
   e = 1000000 * tv.tv_sec + tv.tv_usec;
@@ -689,6 +708,9 @@ void Plan::Refresh() {
 #endif
     if (edge->is_phony()) continue;
     for (auto node : edge->outputs_) {
+      auto started = (started_.find(edge) != started_.end());
+      auto ready = (ready_.find(edge) != ready_.end());
+      if (!(started || ready)) continue;
       DEBUG(0, "%8d %c%05lu\t%s\n",
              edge->acc_cost_,
               (started_.find(edge) != started_.end()

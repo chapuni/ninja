@@ -81,7 +81,7 @@ struct Plan {
   bool DyndepsLoaded(DependencyScan* scan, const Node* node,
                      const DyndepFile& ddf, std::string* err);
 
-  void Refresh();
+  void Refresh(int bonus = 0);
 private:
   bool RefreshDyndepDependents(DependencyScan* scan, const Node* node, std::string* err);
   void UnmarkDependents(const Node* node, std::set<Node*>* dependents);
