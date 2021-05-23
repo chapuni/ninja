@@ -728,10 +728,26 @@ void Plan::Refresh(int bonus) {
 }
 #endif
 
+void Plan::ApplyCost(BuildLog* build_log) {
+  for (auto I = want_.begin(), E = want_.end(); I != E; ++I) {
+    auto edge = I->first;
+    for (auto node : edge->outputs_) {
+      auto log = build_log->LookupByOutput(node->path());
+      if (log) {
+        fprintf(stderr, "%7d\t%p %s\n", log->end_time - log->start_time, log, node->path().c_str());
+        edge->log_cost_ = log->end_time - log->start_time;
+      } else {
+        fprintf(stderr, "\t%p %s\n", log, node->path().c_str());
+      }
+    }
+  }
+}
+
 bool Builder::Build(string* err) {
   assert(!AlreadyUpToDate());
 
 #if 1
+  plan_.ApplyCost(scan_.build_log());
   plan_.Refresh();
 #endif
 
