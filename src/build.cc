@@ -394,7 +394,7 @@ bool Plan::DyndepsLoaded(DependencyScan* scan, const Node* node,
 	    dyndep_roots.size(),
 	    dyndep_walk.size(), targets_.size(),
 	    (dyndep_walk.size() ==  targets_.size() ? "OK" : "***NG***"));
-    Refresh(60000);
+    Refresh(60 * 1000);
   }
 #endif
 
@@ -624,6 +624,7 @@ int traverse(Edge* edge, int bonus, const WantSetT& want) {
   int n_outputs = 0;
   int max_cost = 0;
   int n_unresolved = 0;
+  int out_bonus = 0;
   for (auto node : edge->outputs_) {
     for (auto out_edge : node->out_edges()) {
       if (want.find(out_edge) == want.end()) continue;
@@ -634,6 +635,7 @@ int traverse(Edge* edge, int bonus, const WantSetT& want) {
         max_cost = std::max(max_cost, out_edge->acc_cost_);
       }
     }
+    if (n_outputs > 0 && node->dyndep_pending()) out_bonus = 60 * 1000;
   }
 
   if (n_unresolved > 0) {
@@ -647,6 +649,7 @@ int traverse(Edge* edge, int bonus, const WantSetT& want) {
   } else {
     edge->acc_cost_ = bonus + 1 + edge->cost() + max_cost; // + 100 * n_outputs;
   }
+  edge->acc_cost_ += out_bonus;
   TRACE("%05lu: resolved%8d n=%lu\n", edge->id_, edge->acc_cost_, edge->inputs_.size());
 
   int n = 1;
@@ -711,8 +714,11 @@ void Plan::Refresh(int bonus) {
       auto started = (started_.find(edge) != started_.end());
       auto ready = (ready_.find(edge) != ready_.end());
       if (!(started || ready)) continue;
-      DEBUG(0, "%8d %c%05lu\t%s\n",
-             edge->acc_cost_,
+      DEBUG(0, "%8d%c %c%05lu\t%s\n",
+	    edge->acc_cost_,
+	    (node->dyndep_pending()
+	     ? '*'
+	     : edge->dyndep_ ? '+' : ' '),
               (started_.find(edge) != started_.end()
                ? '*'
                : (ready_.find(edge) != ready_.end()
