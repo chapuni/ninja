@@ -30,6 +30,7 @@ struct Dyndeps {
   bool used_;
   bool restat_;
   std::vector<Node*> implicit_inputs_;
+  std::vector<Node*> optional_inputs_;
   std::vector<Node*> implicit_outputs_;
 };
 
