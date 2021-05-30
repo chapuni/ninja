@@ -181,8 +181,9 @@ bool DyndepParser::ParseEdge(string* err) {
     }
   }
 
+  int num_non_optional_ins = ins.size();
+
   // Parse optional inputs, if any.
-  std::vector<EvalString> opts;
   if (lexer_.PeekToken(Lexer::PIPE2)) {
     for (;;) {
       EvalString in;
@@ -190,7 +191,7 @@ bool DyndepParser::ParseEdge(string* err) {
         return err;
       if (in.empty())
         break;
-      opts.push_back(in);
+      ins.push_back(in);
     }
   }
 
@@ -208,7 +209,10 @@ bool DyndepParser::ParseEdge(string* err) {
     dyndeps->restat_ = !value.empty();
   }
 
-  dyndeps->implicit_inputs_.reserve(ins.size());
+  int num_ins = ins.size();
+
+  dyndeps->implicit_inputs_.reserve(num_ins);
+  dyndeps->num_optional_inputs_ = num_ins - num_non_optional_ins;
   for (vector<EvalString>::iterator i = ins.begin(); i != ins.end(); ++i) {
     string path = i->Evaluate(&env_);
     string path_err;
@@ -217,17 +221,6 @@ bool DyndepParser::ParseEdge(string* err) {
       return lexer_.Error(path_err, err);
     Node* n = state_->GetNode(path, slash_bits);
     dyndeps->implicit_inputs_.push_back(n);
-  }
-
-  dyndeps->optional_inputs_.reserve(opts.size());
-  for (std::vector<EvalString>::iterator i = opts.begin(); i != opts.end(); ++i) {
-    string path = i->Evaluate(&env_);
-    string path_err;
-    uint64_t slash_bits;
-    if (!CanonicalizePath(&path, &slash_bits, &path_err))
-      return lexer_.Error(path_err, err);
-    Node* n = state_->GetNode(path, slash_bits);
-    dyndeps->optional_inputs_.push_back(n);
   }
 
   dyndeps->implicit_outputs_.reserve(outs.size());

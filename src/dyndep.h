@@ -26,11 +26,11 @@ struct State;
 
 /// Store dynamically-discovered dependency information for one edge.
 struct Dyndeps {
-  Dyndeps() : used_(false), restat_(false) {}
+  Dyndeps() : used_(false), restat_(false), num_optional_inputs_(0) {}
   bool used_;
   bool restat_;
   std::vector<Node*> implicit_inputs_;
-  std::vector<Node*> optional_inputs_;
+  int num_optional_inputs_;
   std::vector<Node*> implicit_outputs_;
 };
 
