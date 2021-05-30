@@ -116,6 +116,14 @@ bool DyndepLoader::UpdateEdge(Edge* edge, Dyndeps const* dyndeps,
                        dyndeps->implicit_inputs_.end());
   edge->implicit_deps_ += dyndeps->implicit_inputs_.size();
 
+#if 0
+  for (auto oo : dyndeps->optional_inputs_) {
+    fprintf(stderr, "UPD(%d:%d)<%s>\n", edge->mark_, oo->dirty(), oo->path().c_str());
+  }
+#endif
+
+  edge->optional_inputs_.insert(dyndeps->optional_inputs_.begin(), dyndeps->optional_inputs_.end());
+
   // Add this edge as outgoing from each new input.
   for (std::vector<Node*>::const_iterator i =
            dyndeps->implicit_inputs_.begin();

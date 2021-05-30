@@ -181,19 +181,9 @@ bool DyndepParser::ParseEdge(string* err) {
     }
   }
 
-  int num_non_optional_ins = ins.size();
-
-  // Parse optional inputs, if any.
-  if (lexer_.PeekToken(Lexer::PIPE2)) {
-    for (;;) {
-      EvalString in;
-      if (!lexer_.ReadPath(&in, err))
-        return err;
-      if (in.empty())
-        break;
-      ins.push_back(in);
-    }
-  }
+  // Disallow order-only inputs.
+  if (lexer_.PeekToken(Lexer::PIPE2))
+    return lexer_.Error("order-only inputs not supported", err);
 
   if (!ExpectToken(Lexer::NEWLINE, err))
     return false;
@@ -209,10 +199,8 @@ bool DyndepParser::ParseEdge(string* err) {
     dyndeps->restat_ = !value.empty();
   }
 
-  int num_ins = ins.size();
-
-  dyndeps->implicit_inputs_.reserve(num_ins);
-  dyndeps->num_optional_inputs_ = num_ins - num_non_optional_ins;
+  std::set<Node*> inputs_seen;
+  dyndeps->implicit_inputs_.reserve(ins.size());
   for (vector<EvalString>::iterator i = ins.begin(); i != ins.end(); ++i) {
     string path = i->Evaluate(&env_);
     string path_err;
@@ -220,7 +208,12 @@ bool DyndepParser::ParseEdge(string* err) {
     if (!CanonicalizePath(&path, &slash_bits, &path_err))
       return lexer_.Error(path_err, err);
     Node* n = state_->GetNode(path, slash_bits);
-    dyndeps->implicit_inputs_.push_back(n);
+    if (inputs_seen.find(n) == inputs_seen.end()) {
+      dyndeps->implicit_inputs_.push_back(n);
+      inputs_seen.insert(n);
+    } else {
+      dyndeps->optional_inputs_.insert(n);
+    }
   }
 
   dyndeps->implicit_outputs_.reserve(outs.size());

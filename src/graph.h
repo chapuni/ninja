@@ -176,6 +176,7 @@ struct Edge {
   const Rule* rule_;
   Pool* pool_;
   std::vector<Node*> inputs_;
+  std::set<Node*> optional_inputs_;
   std::vector<Node*> outputs_;
   Node* dyndep_;
   BindingEnv* env_;
@@ -241,8 +242,11 @@ typedef std::set<Edge*, EdgeCmp> EdgeSet;
 
 struct EdgeCmp2 {
   bool operator()(const Edge* a, const Edge* b) const {
-    if (a->acc_cost_ == b->acc_cost_) return a->id_ < b->id_;
-    return a->acc_cost_ > b->acc_cost_;
+    int ao = a->optional_inputs_.empty();
+    int bo = b->optional_inputs_.empty();
+    if (ao != bo) return ao > bo;
+    if (a->acc_cost_ != b->acc_cost_) return a->acc_cost_ > b->acc_cost_;
+    return a->id_ < b->id_;
   }
 };
 

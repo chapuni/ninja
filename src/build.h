@@ -83,6 +83,7 @@ struct Plan {
 
   void ApplyCost(BuildLog* build_log);
   void Refresh(int bonus = 0);
+  void Dump2();
 private:
   bool RefreshDyndepDependents(DependencyScan* scan, const Node* node, std::string* err);
   void UnmarkDependents(const Node* node, std::set<Node*>* dependents);

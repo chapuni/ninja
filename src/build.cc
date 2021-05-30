@@ -205,13 +205,36 @@ bool Plan::EdgeFinished(Edge* edge, EdgeResult result, string* err) {
   want_.erase(e);
   edge->outputs_ready_ = true;
 
+#if 0
+  for (auto node : edge->outputs_) {
+    for (auto oe : node->out_edges()) {
+      auto O = oe->optional_inputs_.find(node);
+      if (O != oe->optional_inputs_.end()) {
+	oe->optional_inputs_.erase(O);
+	for (auto ooo : oe->outputs_) {
+	  fprintf(stderr, "RESOLVED(%lu)<%s><%s>\n", oe->optional_inputs_.size(), node->path().c_str(), ooo->path().c_str());
+	}
+#if 0
+	if ((*oe)->optional_inputs_.empty()) {
+	  // Reschedule
+	  ready_.erase(*oe);
+	}
+#endif
+      }
+    }
+  }
+#endif
+
   // Check off any nodes we were waiting for with this edge.
+  bool ret = true;
   for (vector<Node*>::iterator o = edge->outputs_.begin();
        o != edge->outputs_.end(); ++o) {
-    if (!NodeFinished(*o, err))
-      return false;
+    if (!NodeFinished(*o, err)) {
+      ret = false;
+      continue;
+    }
   }
-  return true;
+  return ret;
 }
 
 bool Plan::NodeFinished(Node* node, string* err) {
@@ -224,21 +247,48 @@ bool Plan::NodeFinished(Node* node, string* err) {
   }
 
   // See if we we want any edges from this node.
+  bool dump = false;
   for (vector<Edge*>::const_iterator oe = node->out_edges().begin();
        oe != node->out_edges().end(); ++oe) {
     map<Edge*, Want>::iterator want_e = want_.find(*oe);
     if (want_e == want_.end())
       continue;
 
+#if 1
+    auto O = (*oe)->optional_inputs_.find(node);
+    if (O != (*oe)->optional_inputs_.end()) {
+#if 0
+      for (auto ooo : (*oe)->outputs_) {
+        fprintf(stderr, "RESOLVED(%lu)<%s><%s>\n", (*oe)->optional_inputs_.size(), node->path().c_str(), ooo->path().c_str());
+      }
+#endif
+      if ((*oe)->optional_inputs_.size() == 1) {
+	if (ready_.find(*oe) != ready_.end()) {
+	  // Reschedule
+	  ready_.erase(*oe);
+	  (*oe)->optional_inputs_.clear();
+	  ready_.insert(*oe);
+	  dump = true;
+	} else {
+	  (*oe)->optional_inputs_.clear();
+	}
+      } else {
+	(*oe)->optional_inputs_.erase(O);
+      }
+    }
+#endif
+
     // See if the edge is now ready.
     if (!EdgeMaybeReady(want_e, err))
       return false;
   }
+  if (dump) Dump2();
   return true;
 }
 
 bool Plan::EdgeMaybeReady(map<Edge*, Want>::iterator want_e, string* err) {
   Edge* edge = want_e->first;
+
   if (edge->AllInputsReady()) {
     if (want_e->second != kWantNothing) {
       ScheduleWork(want_e);
@@ -370,6 +420,13 @@ bool Plan::DyndepsLoaded(DependencyScan* scan, const Node* node,
     map<Edge*, Want>::iterator want_e = want_.find(*wi);
     if (want_e == want_.end())
       continue;
+
+#if 0
+    for (auto oo : (*wi)->optional_inputs_) {
+      fprintf(stderr, "UD(%d)<%s>\n", oo->dirty(), oo->path().c_str());
+    }
+#endif
+
     if (!EdgeMaybeReady(want_e, err))
       return false;
   }
@@ -689,7 +746,10 @@ void Plan::Refresh(int bonus) {
     if (edge->acc_cost_ > 0) continue;
 #endif
     int n = traverse(edge, bonus, want_);
+#if 0
     fprintf(stderr, "%05lu: ready=%d n=%5d\n", edge->id_, edge->outputs_ready(), n);
+#endif
+    (void)n;
   }
 
   targets_.clear(); // XXX
@@ -699,7 +759,9 @@ void Plan::Refresh(int bonus) {
   DEBUG(0, "time=%.6f\n", (e - s) / 1000000.0);
 
   ready_.insert(ready_saved.begin(), ready_saved.end());
-
+#if 1
+  Dump2();
+#else
   EdgeSet2 xxx;
   for (auto I : want_) xxx.insert(I.first);
   for (auto edge : xxx) {
@@ -714,25 +776,60 @@ void Plan::Refresh(int bonus) {
       auto started = (started_.find(edge) != started_.end());
       auto ready = (ready_.find(edge) != ready_.end());
       if (!(started || ready)) continue;
-      DEBUG(0, "%8d%c %c%05lu\t%s\n",
+      DEBUG(0, "%8d%c %2lu %c%05lu\t%s\n",
 	    edge->acc_cost_,
 	    (node->dyndep_pending()
 	     ? '*'
 	     : edge->dyndep_ ? '+' : ' '),
-              (started_.find(edge) != started_.end()
-               ? '*'
-               : (ready_.find(edge) != ready_.end()
-                  ? '+'
-                  : ' ')),
-              edge->id_,
-              node->path().c_str());
+	    edge->optional_inputs_.size(),
+	    (started_.find(edge) != started_.end()
+	     ? '*'
+	     : (ready_.find(edge) != ready_.end()
+		? '+'
+		: ' ')),
+	    edge->id_,
+	    node->path().c_str());
     }
   }
   assert(!"XXX");
+#endif
 
 #endif
 }
 #endif
+
+void Plan::Dump2() {
+  EdgeSet2 xxx;
+  for (auto I : want_) xxx.insert(I.first);
+  fprintf(stderr, "ready=(%lu/%lu)\n", ready_.size(), xxx.size());
+  for (auto edge : xxx) {
+#if 0
+    DEBUG2("%8d %c%05lu:(in=%lu,out=%lu)\n",
+            edge->acc_cost_,
+            (ready_.find(edge) != ready_.end() ? '+' : ' '),
+            edge->id_, edge->inputs_.size(), edge->outputs_.size());
+#endif
+    if (edge->is_phony()) continue;
+    for (auto node : edge->outputs_) {
+      auto started = (started_.find(edge) != started_.end());
+      auto ready = (ready_.find(edge) != ready_.end());
+      if (!(started || ready)) continue;
+      DEBUG(0, "%8d%c %2lu %c%05lu\t%s\n",
+	    edge->acc_cost_,
+	    (node->dyndep_pending()
+	     ? '*'
+	     : edge->dyndep_ ? '+' : ' '),
+	    edge->optional_inputs_.size(),
+	    (started_.find(edge) != started_.end()
+	     ? '*'
+	     : (ready_.find(edge) != ready_.end()
+		? '+'
+		: ' ')),
+	    edge->id_,
+	    node->path().c_str());
+    }
+  }
+}
 
 void Plan::ApplyCost(BuildLog* build_log) {
   for (auto I = want_.begin(), E = want_.end(); I != E; ++I) {

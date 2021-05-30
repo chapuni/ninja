@@ -16,6 +16,7 @@
 #define NINJA_DYNDEP_LOADER_H_
 
 #include <map>
+#include <set>
 #include <string>
 #include <vector>
 
@@ -26,11 +27,11 @@ struct State;
 
 /// Store dynamically-discovered dependency information for one edge.
 struct Dyndeps {
-  Dyndeps() : used_(false), restat_(false), num_optional_inputs_(0) {}
+  Dyndeps() : used_(false), restat_(false) {}
   bool used_;
   bool restat_;
   std::vector<Node*> implicit_inputs_;
-  int num_optional_inputs_;
+  std::set<Node*> optional_inputs_;
   std::vector<Node*> implicit_outputs_;
 };
 

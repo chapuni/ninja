@@ -164,6 +164,27 @@ bool DependencyScan::RecomputeDirty(Node* node, vector<Node*>* stack,
   if (dirty && !(edge->is_phony() && edge->inputs_.empty()))
     edge->outputs_ready_ = false;
 
+#if 0
+  for (auto ii : edge->inputs_) {
+    if (!ii->dirty()) edge->optional_inputs_.erase(ii);
+  }
+#endif
+#if 1
+  for (auto ii : edge->inputs_) {
+    auto ie = ii->in_edge();
+    if (ie && ie->outputs_ready_) {
+      edge->optional_inputs_.erase(ii);
+    }
+  }
+#endif
+#if 0
+  for (auto oo : edge->optional_inputs_) {
+    for (auto ooo : edge->outputs_) {
+      fprintf(stderr, "CD(%d:%d:%d)<%s><%s>\n", oo->dirty(), edge->outputs_ready_, oo->in_edge()->outputs_ready_, oo->path().c_str(), ooo->path().c_str());
+    }
+  }
+#endif
+
   // Mark the edge as finished during this walk now that it will no longer
   // be in the call stack.
   edge->mark_ = Edge::VisitDone;
@@ -316,6 +337,9 @@ bool DependencyScan::LoadDyndeps(Node* node, DyndepFile* ddf,
 bool Edge::AllInputsReady() const {
   for (vector<Node*>::const_iterator i = inputs_.begin();
        i != inputs_.end(); ++i) {
+    if (optional_inputs_.find(*i) != optional_inputs_.end()) {
+      continue;
+    }
     if ((*i)->in_edge() && !(*i)->in_edge()->outputs_ready())
       return false;
   }
