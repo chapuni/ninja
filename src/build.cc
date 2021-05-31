@@ -431,29 +431,21 @@ bool Plan::DyndepsLoaded(DependencyScan* scan, const Node* node,
       return false;
   }
 
-#if 0
-  targets_ = dyndep_walk;
-  Refresh(60000);
-#else
   {
     for (auto edge : dyndep_walk) {
+#if 0
       for (auto node : edge->outputs_)
 	fprintf(stderr, "\t%05lu:%s\n", edge->id_, node->path().c_str());
+#endif
       //edge->acc_cost_ = 0;
       targets_.insert(edge);
     }
-#if 0
-    Edge* edge = node->in_edge();
-    edge->acc_cost_ = 0;
-    targets_.insert(edge);
-#endif
     fprintf(stderr, "root=%lu, walk=%lu, targets=%lu [%s]\n",
 	    dyndep_roots.size(),
 	    dyndep_walk.size(), targets_.size(),
 	    (dyndep_walk.size() ==  targets_.size() ? "OK" : "***NG***"));
     Refresh(60 * 1000);
   }
-#endif
 
   return true;
 }
@@ -799,6 +791,7 @@ void Plan::Refresh(int bonus) {
 #endif
 
 void Plan::Dump2() {
+#if 0
   EdgeSet2 xxx;
   for (auto I : want_) xxx.insert(I.first);
   fprintf(stderr, "ready=(%lu/%lu)\n", ready_.size(), xxx.size());
@@ -829,6 +822,7 @@ void Plan::Dump2() {
 	    node->path().c_str());
     }
   }
+#endif
 }
 
 void Plan::ApplyCost(BuildLog* build_log) {
