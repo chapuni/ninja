@@ -91,7 +91,7 @@ void Plan::Reset() {
 bool Plan::AddTarget(const Node* target, string* err) {
 #if 1
   if (target->in_edge() != NULL) {
-    targets_.insert(target->in_edge());
+    targets_.push_back(target->in_edge());
     fprintf(stderr, "AddTarget(%05lu)\n", target->in_edge()->id_);
   }
 #endif
@@ -438,7 +438,7 @@ bool Plan::DyndepsLoaded(DependencyScan* scan, const Node* node,
 	fprintf(stderr, "\t%05lu:%s\n", edge->id_, node->path().c_str());
 #endif
       //edge->acc_cost_ = 0;
-      targets_.insert(edge);
+      targets_.push_back(edge);
     }
     fprintf(stderr, "root=%lu, walk=%lu, targets=%lu [%s]\n",
 	    dyndep_roots.size(),
@@ -731,6 +731,65 @@ void Plan::Refresh(int bonus) {
   gettimeofday(&tv, NULL);
   s = 1000000 * tv.tv_sec + tv.tv_usec;
 
+#if 1
+  std::deque<Edge*> queue;
+  queue.swap(targets_);
+  while (!queue.empty()) {
+    Edge* edge = queue.front();
+    queue.pop_front();
+
+    if (edge->acc_cost_ > 0) {
+      TRACE("%05lu:      : already visited\n", edge->id_);
+      continue;
+    }
+
+    int n_outputs = 0;
+    int max_cost = 0;
+    int n_unresolved = 0;
+    int out_bonus = 0;
+    for (auto node : edge->outputs_) {
+      for (auto out_edge : node->out_edges()) {
+        if (want_.find(out_edge) == want_.end()) continue;
+        ++n_outputs;
+        if (out_edge->acc_cost_ <= 0) {
+          ++n_unresolved;
+        } else {
+          max_cost = std::max(max_cost, out_edge->acc_cost_);
+        }
+      }
+      if (n_outputs > 0 && node->dyndep_pending()) out_bonus = 60 * 1000;
+    }
+
+    if (n_unresolved > 0) {
+      TRACE("%05lu: unresolved(%d)\n", edge->id_, n_unresolved);
+      edge->acc_cost_ = -n_unresolved;
+      queue.push_back(edge);
+      continue;
+    }
+
+    if (edge->acc_cost_ > 0) {
+      edge->acc_cost_ = std::max(edge->acc_cost_, edge->cost() + max_cost); // + 100 * n_outputs;
+    } else {
+      edge->acc_cost_ = bonus + 1 + edge->cost() + max_cost; // + 100 * n_outputs;
+    }
+    edge->acc_cost_ += out_bonus;
+    TRACE("%05lu: resolved%8d n=%lu\n", edge->id_, edge->acc_cost_, edge->inputs_.size());
+
+    for (auto node : edge->inputs_) {
+      Edge* in_edge = node->in_edge();
+      if (!in_edge) continue;
+      if (want_.find(in_edge) == want_.end()) {
+        continue;
+      }
+      if (in_edge->acc_cost_ < 0 && ++in_edge->acc_cost_ < 0) continue;
+      if (in_edge->acc_cost_ > 0) {
+        TRACE("%05lu: %05lu: visited\n", edge->id_, in_edge->id_);
+        continue;
+      }
+      queue.push_front(in_edge);
+    }
+  }
+#else
   for (auto edge : targets_) {
 #if 1
     //edge->acc_cost_ += bonus;
@@ -743,6 +802,7 @@ void Plan::Refresh(int bonus) {
 #endif
     (void)n;
   }
+#endif
 
   targets_.clear(); // XXX
 
@@ -791,7 +851,7 @@ void Plan::Refresh(int bonus) {
 #endif
 
 void Plan::Dump2() {
-#if 0
+#if 1
   EdgeSet2 xxx;
   for (auto I : want_) xxx.insert(I.first);
   fprintf(stderr, "ready=(%lu/%lu)\n", ready_.size(), xxx.size());
